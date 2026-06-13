@@ -17,6 +17,7 @@
   "documentation": "https://github.com/pdhimate/etoro-mcp-connector#readme",
   "support": "https://github.com/pdhimate/etoro-mcp-connector/issues",
   "license": "MIT",
+  "icon": "icon.png",
   "keywords": ["etoro", "stocks", "crypto", "portfolio", "finance", "investing", "market-data"],
   "server": {
     "type": "node",
