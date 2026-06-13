@@ -8,3 +8,6 @@ dist/
 *.log
 .DS_Store
 Thumbs.db
+
+# Stray fetch/scratch artifacts (the project ships no HTML)
+*.html
