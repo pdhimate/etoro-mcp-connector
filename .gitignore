@@ -1,0 +1,9 @@
+node_modules/
+dist/
+*.mcpb
+*.dxt
+.env
+.env.*
+*.log
+.DS_Store
+Thumbs.db
