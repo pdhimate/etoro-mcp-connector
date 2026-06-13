@@ -1,6 +1,6 @@
 // Smoke test: boots the built server over stdio, performs the MCP handshake,
-// and verifies the tool list for both trading-disabled and trading-enabled
-// configurations. No real eToro credentials are needed (no API calls made).
+// and verifies the read-only tool set. No real eToro credentials are needed
+// (the assertions fail before any network call).
 import { spawn } from "node:child_process";
 import { deepStrictEqual, strictEqual } from "node:assert";
 
@@ -123,14 +123,19 @@ function expectStartupFailure(env) {
   });
 }
 
-// 1. Trading disabled (default): only read tools, all marked read-only.
-const readOnlyRun = await runServer({ ETORO_ENABLE_TRADING: "false" });
+// 1. Read-only connector: exactly the read tools, all marked read-only, no write tools.
+const readOnlyRun = await runServer({});
 strictEqual(readOnlyRun.serverInfo.name, "etoro-connector");
 deepStrictEqual(readOnlyRun.tools, READ_TOOLS);
+for (const name of WRITE_TOOLS) {
+  if (readOnlyRun.tools.includes(name)) {
+    throw new Error(`read-only connector must not expose the trading tool "${name}"`);
+  }
+}
 for (const [name, annotations] of Object.entries(readOnlyRun.annotations)) {
   strictEqual(annotations?.readOnlyHint, true, `${name} must be readOnlyHint: true`);
 }
-console.log(`PASS read-only mode: ${readOnlyRun.tools.length} tools, all readOnlyHint`);
+console.log(`PASS read-only mode: ${readOnlyRun.tools.length} tools, all readOnlyHint, no trading tools`);
 
 // 1a. Tool-execution path (offline-safe): handler error + zod validation + arguments-omitted.
 strictEqual(readOnlyRun.quotesEmpty.isError, true, "get_quotes with {} must return isError");
@@ -151,16 +156,7 @@ if (readOnlyRun.accountNoArgs.content[0].text.includes("Input validation error")
 }
 console.log("PASS tool execution: handler errors, zod validation, and arguments-omitted all behave");
 
-// 2. Trading enabled: read + write tools, write tools marked destructive.
-const tradingRun = await runServer({ ETORO_ENABLE_TRADING: "true", ETORO_DEMO_MODE: "true" });
-deepStrictEqual(tradingRun.tools, [...READ_TOOLS, ...WRITE_TOOLS].sort());
-for (const name of WRITE_TOOLS) {
-  strictEqual(tradingRun.annotations[name]?.destructiveHint, true, `${name} must be destructiveHint: true`);
-  strictEqual(tradingRun.annotations[name]?.readOnlyHint, false, `${name} must be readOnlyHint: false`);
-}
-console.log(`PASS trading mode: ${tradingRun.tools.length} tools, write tools destructive`);
-
-// 3. Missing credentials: server must refuse to start.
+// 2. Missing credentials: server must refuse to start.
 await expectStartupFailure({ ETORO_API_KEY: "", ETORO_USER_KEY: "" });
 console.log("PASS missing credentials: server exits with code 1");
 

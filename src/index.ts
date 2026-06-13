@@ -14,7 +14,6 @@ function envFlag(name: string): boolean {
 const apiKey = (process.env.ETORO_API_KEY ?? "").trim();
 const userKey = (process.env.ETORO_USER_KEY ?? "").trim();
 const demo = envFlag("ETORO_DEMO_MODE");
-const tradingEnabled = envFlag("ETORO_ENABLE_TRADING");
 
 if (!apiKey || !userKey) {
   console.error(
@@ -26,14 +25,12 @@ if (!apiKey || !userKey) {
 
 const server = new McpServer({ name: "etoro-connector", version: SERVER_VERSION });
 
-registerTools(server, new EtoroClient({ apiKey, userKey, demo }), tradingEnabled);
+registerTools(server, new EtoroClient({ apiKey, userKey, demo }));
 
 const transport = new StdioServerTransport();
 await server.connect(transport);
 
 // stdout carries the MCP protocol; all logging goes to stderr.
 console.error(
-  `eToro MCP connector ${SERVER_VERSION} started — environment: ${demo ? "demo" : "real"}, trading tools: ${
-    tradingEnabled ? "enabled" : "disabled"
-  }.`,
+  `eToro MCP connector ${SERVER_VERSION} (read-only) started — environment: ${demo ? "demo" : "real"}.`,
 );

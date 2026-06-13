@@ -1,6 +1,6 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { EtoroClient, OrderRequest } from "./etoroClient.js";
+import { EtoroClient } from "./etoroClient.js";
 
 function jsonResult(data: unknown) {
   return { content: [{ type: "text" as const, text: JSON.stringify(data, null, 2) }] };
@@ -24,26 +24,24 @@ function wrap<A>(handler: Handler<A>): Handler<A> {
 }
 
 const READ_ONLY = { readOnlyHint: true, openWorldHint: true };
-const DESTRUCTIVE = { readOnlyHint: false, destructiveHint: true, openWorldHint: true };
 
-export function registerTools(server: McpServer, client: EtoroClient, tradingEnabled: boolean): void {
-  // ------------------------------------------------------------------
-  // Read-only tools
-  // ------------------------------------------------------------------
+export function registerTools(server: McpServer, client: EtoroClient): void {
+  // This is the read-only connector: it registers portfolio and market-data
+  // tools only. There are no trade-execution tools.
 
   server.registerTool(
     "get_account_info",
     {
       title: "Get eToro account info",
       description:
-        "Returns the authenticated eToro account identity (username, account IDs, API key scopes) plus this connector's configuration: environment (demo or real) and whether trading tools are enabled.",
+        "Returns the authenticated eToro account identity (username, account IDs, API key scopes) plus this connector's configuration: environment (demo or real). This is a read-only connector with no trading tools.",
       annotations: READ_ONLY,
     },
     wrap(async () => {
       const me = await client.me();
       return jsonResult({
         environment: client.environment,
-        tradingToolsEnabled: tradingEnabled,
+        readOnly: true,
         account: me,
       });
     }),
@@ -355,10 +353,10 @@ export function registerTools(server: McpServer, client: EtoroClient, tradingEna
     {
       title: "Get order status",
       description:
-        "Looks up the status of a previously submitted order by order_id or reference_id (returned by place_order), including execution state, executed positions, and any error message.",
+        "Looks up the status of an order you previously submitted via the eToro app or website, by order_id or reference_id, including execution state, executed positions, and any error message. Read-only; this connector cannot itself place orders.",
       inputSchema: {
         order_id: z.union([z.number().int(), z.string()]).optional().describe("Numeric order ID."),
-        reference_id: z.string().optional().describe("Reference ID (UUID) returned when the order was placed."),
+        reference_id: z.string().optional().describe("Reference ID (UUID) associated with the order."),
       },
       annotations: READ_ONLY,
     },
@@ -374,180 +372,5 @@ export function registerTools(server: McpServer, client: EtoroClient, tradingEna
       return jsonResult({ environment: client.environment, ...((result && typeof result === "object") ? result : { result }) });
     }),
   );
-
-  // ------------------------------------------------------------------
-  // Trading tools — only registered when the user has explicitly enabled
-  // trading in the connector settings (requires a Write-permission key).
-  // ------------------------------------------------------------------
-
-  if (!tradingEnabled) return;
-
-  server.registerTool(
-    "place_order",
-    {
-      title: "Place order (open position)",
-      description:
-        "Places a REAL order on eToro (or a virtual one in demo mode) to open a position. Specify the instrument by symbol or instrument_id, direction (buy = long, sellShort = short), and exactly one of amount (cash, USD) or units. Optional: leverage, stop loss, take profit, and market-if-touched trigger rate. This commits the user's money in real mode — only call it when the user has explicitly asked to place this specific trade.",
-      inputSchema: {
-        symbol: z.string().optional().describe("Ticker symbol, e.g. AAPL. Provide this or instrument_id."),
-        instrument_id: z.number().int().optional().describe("eToro instrument ID. Provide this or symbol."),
-        direction: z.enum(["buy", "sellShort"]).describe("buy = long position, sellShort = short position."),
-        order_type: z
-          .enum(["mkt", "mit"])
-          .default("mkt")
-          .describe("mkt = market order (immediate), mit = market-if-touched (executes when trigger_rate is reached)."),
-        trigger_rate: z.number().positive().optional().describe("Trigger price. Required for mit orders."),
-        leverage: z.number().int().min(1).default(1).describe("Leverage multiplier. 1 = no leverage (default)."),
-        amount: z
-          .number()
-          .positive()
-          .optional()
-          .describe("Cash amount to invest in order_currency. Provide exactly one of amount or units."),
-        units: z
-          .number()
-          .positive()
-          .optional()
-          .describe("Number of units/shares to buy. Provide exactly one of amount or units."),
-        order_currency: z.string().default("usd").describe('Currency for amount. Currently "usd".'),
-        stop_loss_rate: z.number().positive().optional().describe("Stop-loss price level."),
-        take_profit_rate: z.number().positive().optional().describe("Take-profit price level."),
-        stop_loss_type: z.enum(["fixed", "trailing"]).optional().describe("Stop-loss behavior."),
-      },
-      annotations: DESTRUCTIVE,
-    },
-    wrap(async (args) => {
-      if (!args.symbol && args.instrument_id === undefined) {
-        throw new Error("Provide symbol or instrument_id.");
-      }
-      if ((args.amount === undefined) === (args.units === undefined)) {
-        throw new Error("Provide exactly one of amount (cash) or units.");
-      }
-      if (args.order_type === "mit" && args.trigger_rate === undefined) {
-        throw new Error("trigger_rate is required for mit (market-if-touched) orders.");
-      }
-
-      // Always send eToro an internally consistent (symbol, instrumentId) pair.
-      // A mismatched pair from a hallucinating model could otherwise trade the
-      // wrong asset, so verify both resolve to the same instrument.
-      let instrumentId = args.instrument_id;
-      let symbol = args.symbol;
-      if (symbol && instrumentId !== undefined) {
-        const resolved = await client.resolveInstrument(symbol);
-        if (resolved.instrumentId !== instrumentId) {
-          throw new Error(
-            `symbol "${symbol}" resolves to instrumentId ${resolved.instrumentId}, which does not match the supplied instrument_id ${instrumentId}. ` +
-              "Re-check with search_instruments and pass a consistent pair, or only one of the two.",
-          );
-        }
-        symbol = resolved.symbol;
-      } else if (instrumentId === undefined && symbol) {
-        const resolved = await client.resolveInstrument(symbol);
-        instrumentId = resolved.instrumentId;
-        symbol = resolved.symbol;
-      } else if (instrumentId !== undefined && !symbol) {
-        // eToro's docs say symbol is required for open orders; look it up so
-        // the order body always carries both fields.
-        const names = await client.instrumentNames([instrumentId]);
-        const meta = names.get(instrumentId);
-        if (!meta?.symbol) {
-          throw new Error(
-            `instrument_id ${instrumentId} could not be found via market-data lookup. ` +
-              "Verify it with search_instruments, or pass the ticker symbol instead.",
-          );
-        }
-        symbol = meta.symbol;
-      }
-
-      const order: OrderRequest = {
-        action: "open",
-        transaction: args.direction,
-        orderType: args.order_type,
-        leverage: args.leverage,
-      };
-      if (symbol) order.symbol = symbol;
-      if (instrumentId !== undefined) order.instrumentId = instrumentId;
-      if (args.trigger_rate !== undefined) order.triggerRate = args.trigger_rate;
-      if (args.amount !== undefined) {
-        order.amount = args.amount;
-        order.orderCurrency = args.order_currency;
-      }
-      if (args.units !== undefined) order.units = args.units;
-      if (args.stop_loss_rate !== undefined) order.stopLossRate = args.stop_loss_rate;
-      if (args.take_profit_rate !== undefined) order.takeProfitRate = args.take_profit_rate;
-      if (args.stop_loss_type !== undefined) order.stopLossType = args.stop_loss_type;
-
-      const result = await client.placeOrder(order);
-      return jsonResult({
-        environment: client.environment,
-        submittedOrder: order,
-        result,
-        note: "Order submitted, not necessarily executed yet. Use get_order_status with the returned orderId or referenceId to confirm execution.",
-      });
-    }),
-  );
-
-  server.registerTool(
-    "close_position",
-    {
-      title: "Close position",
-      description:
-        "Closes an open position (fully, or partially via units) at market price in the configured environment. Identify the position with position_id from get_positions. This commits the user's money in real mode — only call it when the user has explicitly asked to close this specific position.",
-      inputSchema: {
-        position_id: z.number().int().describe("The positionID of the open position (see get_positions)."),
-        instrument_id: z
-          .number()
-          .int()
-          .optional()
-          .describe("Instrument ID of the position. Looked up automatically from the portfolio when omitted."),
-        units: z
-          .number()
-          .positive()
-          .optional()
-          .describe("Number of units to close for a partial close. Omit to close the entire position."),
-      },
-      annotations: DESTRUCTIVE,
-    },
-    wrap(async (args) => {
-      let instrumentId = args.instrument_id;
-      if (instrumentId === undefined) {
-        const portfolio = await client.portfolio();
-        const positions: any[] = portfolio?.clientPortfolio?.positions ?? [];
-        const position = positions.find(
-          (p) => Number(p.positionID ?? p.positionId) === args.position_id,
-        );
-        if (!position) {
-          throw new Error(
-            `Position ${args.position_id} not found in the ${client.environment} portfolio. Use get_positions to list open positions.`,
-          );
-        }
-        instrumentId = Number(position.instrumentID ?? position.instrumentId);
-      }
-      const result = await client.closePosition(args.position_id, {
-        instrumentId,
-        unitsToDeduct: args.units ?? null,
-      });
-      return jsonResult({
-        environment: client.environment,
-        closed: args.units === undefined ? "entire position" : `${args.units} units`,
-        result,
-      });
-    }),
-  );
-
-  server.registerTool(
-    "cancel_order",
-    {
-      title: "Cancel pending order",
-      description:
-        "Cancels a pending (not yet executed) order by its order ID in the configured environment. Cannot cancel an already-executed order — use close_position for open positions instead.",
-      inputSchema: {
-        order_id: z.union([z.number().int(), z.string()]).describe("The order ID to cancel."),
-      },
-      annotations: DESTRUCTIVE,
-    },
-    wrap(async (args) => {
-      const result = await client.cancelOrder(args.order_id);
-      return jsonResult({ environment: client.environment, cancelled: args.order_id, result });
-    }),
-  );
 }
+

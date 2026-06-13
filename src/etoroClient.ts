@@ -50,23 +50,6 @@ export class EtoroApiError extends Error {
 
 type Query = Record<string, string | number | boolean | undefined>;
 
-export interface OrderRequest {
-  action: "open" | "close";
-  transaction: "buy" | "sell" | "sellShort" | "buyToCover";
-  symbol?: string;
-  instrumentId?: number;
-  orderType?: "mkt" | "mit";
-  triggerRate?: number;
-  leverage?: number;
-  amount?: number;
-  orderCurrency?: string;
-  units?: number;
-  stopLossRate?: number;
-  takeProfitRate?: number;
-  stopLossType?: "fixed" | "trailing";
-  positionIds?: number[];
-}
-
 export interface ResolvedInstrument {
   instrumentId: number;
   symbol: string;
@@ -164,10 +147,6 @@ export class EtoroClient {
     return this.request("POST", path, query, body);
   }
 
-  private delete(path: string): Promise<any> {
-    return this.request("DELETE", path);
-  }
-
   // ---- identity ----
 
   me(): Promise<any> {
@@ -239,33 +218,8 @@ export class EtoroClient {
     return this.post(this.demo ? "/api/v2/trading/info/demo/eligibility" : "/api/v2/trading/info/eligibility", body);
   }
 
-  // ---- trading execution ----
-
-  placeOrder(body: OrderRequest): Promise<any> {
-    return this.post(this.demo ? "/api/v2/trading/execution/demo/orders" : "/api/v2/trading/execution/orders", body);
-  }
-
-  closePosition(positionId: number, params: { instrumentId: number; unitsToDeduct: number | null }): Promise<any> {
-    // The official OpenAPI spec cases the instrument field differently per
-    // environment: real requires `InstrumentId`, demo requires `InstrumentID`.
-    const body = this.demo
-      ? { InstrumentID: params.instrumentId, UnitsToDeduct: params.unitsToDeduct }
-      : { InstrumentId: params.instrumentId, UnitsToDeduct: params.unitsToDeduct };
-    return this.post(
-      this.demo
-        ? `/api/v1/trading/execution/demo/market-close-orders/positions/${positionId}`
-        : `/api/v1/trading/execution/market-close-orders/positions/${positionId}`,
-      body,
-    );
-  }
-
-  cancelOrder(orderId: number | string): Promise<any> {
-    return this.delete(
-      this.demo
-        ? `/api/v2/trading/execution/demo/orders/${encodeURIComponent(String(orderId))}`
-        : `/api/v2/trading/execution/orders/${encodeURIComponent(String(orderId))}`,
-    );
-  }
+  // This is the read-only connector: it deliberately exposes no
+  // trade-execution methods (no order placement, closing, or cancellation).
 
   // ---- helpers ----
 

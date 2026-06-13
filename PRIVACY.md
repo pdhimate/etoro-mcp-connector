@@ -10,7 +10,8 @@ This extension is a local MCP server that runs entirely on your own computer ins
 
 - **eToro API credentials** (API key and User key): you provide these in the extension settings. Claude Desktop stores them in your operating system's secure keychain (macOS Keychain / Windows Credential Manager) because they are declared `sensitive` in the extension manifest. The extension only ever reads them from its environment at startup and attaches them as the `x-api-key` / `x-user-key` request headers required by [eToro's API documentation](https://api-portal.etoro.com/getting-started/authentication).
 - **Your eToro account data** (portfolio, positions, balances, trade history, watchlists, quotes): fetched on demand from `https://public-api.etoro.com` and returned directly to Claude in your conversation. The extension keeps no copy; nothing is written to disk.
-- **Trade instructions**: if (and only if) you enable trading tools and approve a tool call, the order details you requested are sent to eToro's trading endpoints.
+
+This is a read-only connector: it only ever reads from eToro's API. It does not place, modify, close, or cancel any orders, and it sends no instructions that change your account.
 
 ## What the extension does NOT do
 

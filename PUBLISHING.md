@@ -10,13 +10,13 @@ What ships: the `etoro-mcp-connector.mcpb` bundle produced by `mcpb pack` (a zip
 
 ### Pre-submission checklist (Anthropic's review criteria)
 
-- [x] Every tool has a `title` and a `readOnlyHint: true` **or** `destructiveHint: true` annotation matching its real behavior
+- [x] Every tool is annotated `readOnlyHint: true` and has a `title` — this is a read-only connector with no trade-execution tools
 - [x] Tool names ≤ 64 characters; descriptions match actual behavior
 - [x] No tool mixes safe (GET) and unsafe (POST/DELETE) operations
 - [x] Privacy policy: section in `README.md` **and** `privacy_policies` HTTPS URL in `manifest.json` ("missing or incomplete privacy policies result in immediate rejection")
 - [x] `manifest.json` passes `npx @anthropic-ai/mcpb validate manifest.json`
 - [ ] **Test the packed extension on both Windows and macOS** (required) — install the `.mcpb` in Claude Desktop on each OS and exercise the tools with a real key
-- [ ] Test all tools with [MCP Inspector](https://github.com/modelcontextprotocol/inspector): `npx @modelcontextprotocol/inspector node dist/index.js` (set the four `ETORO_*` env vars)
+- [ ] Test all tools with [MCP Inspector](https://github.com/modelcontextprotocol/inspector): `npx @modelcontextprotocol/inspector node dist/index.js` (set the three `ETORO_*` env vars: `ETORO_API_KEY`, `ETORO_USER_KEY`, `ETORO_DEMO_MODE`)
 - [ ] Push this repo to GitHub so the `privacy_policies` / `repository` / `support` URLs in `manifest.json` resolve (update the URLs if your repo name differs)
 
 ### Steps
@@ -27,15 +27,15 @@ What ships: the `etoro-mcp-connector.mcpb` bundle produced by `mcpb pack` (a zip
    ```bash
    npm run pack:mcpb   # build + smoke test + prune dev deps + pack
    ```
-3. **Test the bundle yourself** on Windows and macOS: double-click the `.mcpb` (or Claude Desktop → Settings → Extensions → Install Extension…), enter a **demo** eToro key first, and try: portfolio summary, a quote, a search, and (with trading enabled on a demo Write key) a small order.
+3. **Test the bundle yourself** on Windows and macOS: double-click the `.mcpb` (or Claude Desktop → Settings → Extensions → Install Extension…), enter a **demo** eToro key first, and try: portfolio summary, a quote, a search, and price history.
 4. **Submit** via Anthropic's desktop-extension submission form:
    **<https://clau.de/desktop-extention-submission>** (yes, "extention" — that's the official short link; it redirects to a Google Form).
-   You'll be asked for the extension details, download link, and privacy policy. Mention explicitly that trading tools are opt-in (off by default), annotated `destructiveHint`, and require the user's own Write-permission eToro key.
+   You'll be asked for the extension details, download link, and privacy policy. Note that this is a **read-only** connector (all tools `readOnlyHint`, no trade execution).
 5. **Wait for review.** Reviewers functionally test every tool; consider including instructions for creating a **demo-environment** eToro key so they can test without real money. Review time varies with queue volume; escalations: <mcp-review@anthropic.com>.
 
 ### Heads-up for review
 
-- Anthropic's criteria list "money transfers" as an unsupported category. Brokerage **trading on the user's own account with the user's own keys** is a different thing from money transfer, and the read-only default + opt-in trading flag is designed to make that boundary clear — but be prepared for extra scrutiny of `place_order`/`close_position`/`cancel_order`. If the trading tools block approval, submit a read-only build first (set `enable_trading` aside) and add trading in a later version.
+- This connector is read-only, which avoids the "money transfers" scrutiny entirely — there are no order placement, closing, or cancellation tools. (The trading-capable variant lives on the `with-trading` git branch for a possible later, separately-reviewed submission.)
 - The connector calls eToro's API rather than "your own first-party API". This is the standard pattern for user-supplied-credential desktop extensions (the directory contains many such community connectors), but state it plainly in the submission form.
 
 ## Path 2 — Remote MCP server in the connectors directory (optional, later)
