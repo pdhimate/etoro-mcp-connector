@@ -37,7 +37,6 @@ export function registerTools(server: McpServer, client: EtoroClient, tradingEna
       title: "Get eToro account info",
       description:
         "Returns the authenticated eToro account identity (username, account IDs, API key scopes) plus this connector's configuration: environment (demo or real) and whether trading tools are enabled.",
-      inputSchema: {},
       annotations: READ_ONLY,
     },
     wrap(async () => {
@@ -56,7 +55,6 @@ export function registerTools(server: McpServer, client: EtoroClient, tradingEna
       title: "Get portfolio summary",
       description:
         "Returns aggregated account totals for the configured environment (demo/real): equity (accountTotalValue), available cash, frozen cash, used margin, current P&L, plus per-instrument aggregate exposure with instrument names.",
-      inputSchema: {},
       annotations: READ_ONLY,
     },
     wrap(async () => {
@@ -79,7 +77,6 @@ export function registerTools(server: McpServer, client: EtoroClient, tradingEna
       title: "Get open positions",
       description:
         "Returns all open positions in the configured environment (demo/real) with entry rate, invested amount, units, leverage, stop loss / take profit, and fees — enriched with instrument symbol and name. Also returns available cash (credit) and any pending orders.",
-      inputSchema: {},
       annotations: READ_ONLY,
     },
     wrap(async () => {
@@ -116,7 +113,6 @@ export function registerTools(server: McpServer, client: EtoroClient, tradingEna
       title: "Get profit and loss",
       description:
         "Returns the current profit-and-loss view for the configured environment (demo/real): unrealized P&L and per-position P&L with current close rates.",
-      inputSchema: {},
       annotations: READ_ONLY,
     },
     wrap(async () => {
@@ -214,8 +210,8 @@ export function registerTools(server: McpServer, client: EtoroClient, tradingEna
       description:
         "Returns current bid/ask prices for up to 100 instruments, identified by ticker symbols (e.g. AAPL, BTC) and/or eToro instrument IDs.",
       inputSchema: {
-        symbols: z.array(z.string()).optional().describe('Ticker symbols, e.g. ["AAPL", "BTC"].'),
-        instrument_ids: z.array(z.number().int()).optional().describe("eToro instrument IDs."),
+        symbols: z.array(z.string()).max(100).optional().describe('Ticker symbols, e.g. ["AAPL", "BTC"].'),
+        instrument_ids: z.array(z.number().int()).max(100).optional().describe("eToro instrument IDs."),
       },
       annotations: READ_ONLY,
     },
@@ -224,6 +220,9 @@ export function registerTools(server: McpServer, client: EtoroClient, tradingEna
       const directIds = args.instrument_ids ?? [];
       if (symbols.length === 0 && directIds.length === 0) {
         throw new Error("Provide at least one of symbols or instrument_ids.");
+      }
+      if (symbols.length + directIds.length > 100) {
+        throw new Error("At most 100 instruments per quotes request.");
       }
       const labels = new Map<number, { symbol: string; name?: string }>();
       const ids: number[] = [...directIds];
@@ -298,11 +297,31 @@ export function registerTools(server: McpServer, client: EtoroClient, tradingEna
     "get_watchlists",
     {
       title: "Get watchlists",
-      description: "Returns the user's eToro watchlists and the instruments in each.",
-      inputSchema: {},
+      description:
+        "Returns the user's eToro watchlists. Each item is an instrument ID (occasionally a copied-trader ID), enriched with instrument symbol and name where available.",
       annotations: READ_ONLY,
     },
-    wrap(async () => jsonResult(await client.watchlists())),
+    wrap(async () => {
+      const res = await client.watchlists();
+      const watchlists: any[] = res?.watchlists ?? [];
+      const ids = watchlists
+        .flatMap((w: any) => w?.items ?? [])
+        .filter((it: any) => it?.itemType === "Instrument")
+        .map((it: any) => Number(it.itemId))
+        .filter((id: number) => Number.isFinite(id));
+      const names = await client.instrumentNames(ids);
+      return jsonResult({
+        ...res,
+        watchlists: watchlists.map((w: any) => ({
+          ...w,
+          items: (w?.items ?? []).map((it: any) =>
+            it?.itemType === "Instrument"
+              ? { ...it, instrument: names.get(Number(it.itemId)) ?? undefined }
+              : it,
+          ),
+        })),
+      });
+    }),
   );
 
   server.registerTool(
@@ -312,8 +331,8 @@ export function registerTools(server: McpServer, client: EtoroClient, tradingEna
       description:
         "Checks whether instruments can currently be traded in the configured environment and returns trading constraints: allowed leverage values, minimum position amount, stop-loss/take-profit percentage limits, and max units per order. Read-only pre-trade check; does not place any order.",
       inputSchema: {
-        symbols: z.array(z.string()).optional().describe('Ticker symbols to check, e.g. ["AAPL"].'),
-        instrument_ids: z.array(z.number().int()).optional().describe("eToro instrument IDs to check."),
+        symbols: z.array(z.string()).max(100).optional().describe('Ticker symbols to check, e.g. ["AAPL"].'),
+        instrument_ids: z.array(z.number().int()).max(100).optional().describe("eToro instrument IDs to check."),
       },
       annotations: READ_ONLY,
     },
@@ -407,12 +426,36 @@ export function registerTools(server: McpServer, client: EtoroClient, tradingEna
         throw new Error("trigger_rate is required for mit (market-if-touched) orders.");
       }
 
+      // Always send eToro an internally consistent (symbol, instrumentId) pair.
+      // A mismatched pair from a hallucinating model could otherwise trade the
+      // wrong asset, so verify both resolve to the same instrument.
       let instrumentId = args.instrument_id;
       let symbol = args.symbol;
-      if (instrumentId === undefined && symbol) {
+      if (symbol && instrumentId !== undefined) {
+        const resolved = await client.resolveInstrument(symbol);
+        if (resolved.instrumentId !== instrumentId) {
+          throw new Error(
+            `symbol "${symbol}" resolves to instrumentId ${resolved.instrumentId}, which does not match the supplied instrument_id ${instrumentId}. ` +
+              "Re-check with search_instruments and pass a consistent pair, or only one of the two.",
+          );
+        }
+        symbol = resolved.symbol;
+      } else if (instrumentId === undefined && symbol) {
         const resolved = await client.resolveInstrument(symbol);
         instrumentId = resolved.instrumentId;
         symbol = resolved.symbol;
+      } else if (instrumentId !== undefined && !symbol) {
+        // eToro's docs say symbol is required for open orders; look it up so
+        // the order body always carries both fields.
+        const names = await client.instrumentNames([instrumentId]);
+        const meta = names.get(instrumentId);
+        if (!meta?.symbol) {
+          throw new Error(
+            `instrument_id ${instrumentId} could not be found via market-data lookup. ` +
+              "Verify it with search_instruments, or pass the ticker symbol instead.",
+          );
+        }
+        symbol = meta.symbol;
       }
 
       const order: OrderRequest = {
@@ -480,8 +523,8 @@ export function registerTools(server: McpServer, client: EtoroClient, tradingEna
         instrumentId = Number(position.instrumentID ?? position.instrumentId);
       }
       const result = await client.closePosition(args.position_id, {
-        InstrumentId: instrumentId,
-        UnitsToDeduct: args.units ?? null,
+        instrumentId,
+        unitsToDeduct: args.units ?? null,
       });
       return jsonResult({
         environment: client.environment,

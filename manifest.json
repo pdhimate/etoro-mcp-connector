@@ -67,7 +67,7 @@
     { "name": "get_portfolio_summary", "description": "Equity, cash, margin, P&L totals and per-instrument exposure" },
     { "name": "get_positions", "description": "Open positions with instrument names, plus pending orders" },
     { "name": "get_pnl", "description": "Unrealized P&L per position with current close rates" },
-    { "name": "get_balances", "description": "Cash balances across eToro account types" },
+    { "name": "get_balances", "description": "Cash balances across eToro account types (real account only — eToro has no demo balances endpoint)" },
     { "name": "get_trade_history", "description": "Closed trades with profit, fees, and rates" },
     { "name": "search_instruments", "description": "Find stocks, ETFs, crypto and other instruments by name or ticker" },
     { "name": "get_quotes", "description": "Live bid/ask prices for up to 100 instruments" },

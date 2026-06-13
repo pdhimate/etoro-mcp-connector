@@ -54,7 +54,13 @@ function runServer(extraEnv) {
         const line = buffer.slice(0, newline).trim();
         buffer = buffer.slice(newline + 1);
         if (!line) continue;
-        const message = JSON.parse(line);
+        let message;
+        try {
+          message = JSON.parse(line);
+        } catch {
+          fail(new Error(`server wrote non-JSON to stdout (breaks the stdio protocol): ${line}`));
+          return;
+        }
         if (message.id !== undefined && pending.has(message.id)) {
           const { res, rej } = pending.get(message.id);
           pending.delete(message.id);
@@ -64,6 +70,8 @@ function runServer(extraEnv) {
     });
     child.on("error", fail);
 
+    const callTool = (name, args) => send("tools/call", args === undefined ? { name } : { name, arguments: args });
+
     (async () => {
       const init = await send("initialize", {
         protocolVersion: "2025-06-18",
@@ -72,12 +80,19 @@ function runServer(extraEnv) {
       });
       await send("notifications/initialized", undefined, false);
       const list = await send("tools/list", {});
+      // Exercise the tool-execution path (offline-safe — these fail before any network call).
+      const quotesEmpty = await callTool("get_quotes", {});
+      const tradeHistoryBad = await callTool("get_trade_history", { page: "not-a-number" });
+      const accountNoArgs = await callTool("get_account_info"); // 'arguments' field omitted entirely
       clearTimeout(timer);
       child.kill();
       resolve({
         serverInfo: init.serverInfo,
         tools: list.tools.map((t) => t.name).sort(),
         annotations: Object.fromEntries(list.tools.map((t) => [t.name, t.annotations])),
+        quotesEmpty,
+        tradeHistoryBad,
+        accountNoArgs,
       });
     })().catch(fail);
   });
@@ -86,13 +101,24 @@ function runServer(extraEnv) {
 function expectStartupFailure(env) {
   return new Promise((resolve, reject) => {
     const child = spawn(process.execPath, ["dist/index.js"], { env: { ...process.env, ...env }, stdio: ["pipe", "pipe", "pipe"] });
+    const stderr = [];
+    child.stderr.on("data", (d) => stderr.push(d));
     const timer = setTimeout(() => {
       child.kill();
       reject(new Error("server did not exit despite missing credentials"));
     }, 10_000);
+    child.on("error", (err) => {
+      clearTimeout(timer);
+      reject(err);
+    });
     child.on("exit", (code) => {
       clearTimeout(timer);
-      code === 1 ? resolve() : reject(new Error(`expected exit code 1, got ${code}`));
+      if (code !== 1) return reject(new Error(`expected exit code 1, got ${code}`));
+      const text = stderr.join("");
+      if (!text.includes("missing credentials")) {
+        return reject(new Error(`expected a 'missing credentials' message on stderr, got: ${text}`));
+      }
+      resolve();
     });
   });
 }
@@ -105,6 +131,25 @@ for (const [name, annotations] of Object.entries(readOnlyRun.annotations)) {
   strictEqual(annotations?.readOnlyHint, true, `${name} must be readOnlyHint: true`);
 }
 console.log(`PASS read-only mode: ${readOnlyRun.tools.length} tools, all readOnlyHint`);
+
+// 1a. Tool-execution path (offline-safe): handler error + zod validation + arguments-omitted.
+strictEqual(readOnlyRun.quotesEmpty.isError, true, "get_quotes with {} must return isError");
+strictEqual(readOnlyRun.quotesEmpty.content[0].type, "text", "error result must be a text block");
+strictEqual(
+  readOnlyRun.quotesEmpty.content[0].text,
+  "Provide at least one of symbols or instrument_ids.",
+  "get_quotes with {} must return the guard message",
+);
+strictEqual(readOnlyRun.tradeHistoryBad.isError, true, "get_trade_history with bad page must error");
+if (!readOnlyRun.tradeHistoryBad.content[0].text.includes("Input validation error")) {
+  throw new Error(`expected a validation error, got: ${readOnlyRun.tradeHistoryBad.content[0].text}`);
+}
+// A tool with no inputSchema must accept a call that omits the 'arguments' field
+// (it then fails on the fake API key, not on input validation).
+if (readOnlyRun.accountNoArgs.content[0].text.includes("Input validation error")) {
+  throw new Error("get_account_info rejected a call with 'arguments' omitted — should accept it");
+}
+console.log("PASS tool execution: handler errors, zod validation, and arguments-omitted all behave");
 
 // 2. Trading enabled: read + write tools, write tools marked destructive.
 const tradingRun = await runServer({ ETORO_ENABLE_TRADING: "true", ETORO_DEMO_MODE: "true" });

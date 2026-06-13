@@ -7,7 +7,7 @@
   "scripts": {
     "build": "tsc",
     "smoke": "node scripts/smoke-test.mjs",
-    "prepack:mcpb": "npm run build && npm run smoke"
+    "pack:mcpb": "npm install && npm run build && npm run smoke && npm install --omit=dev && npx @anthropic-ai/mcpb pack . etoro-mcp-connector.mcpb && npm install"
   },
   "engines": {
     "node": ">=18"

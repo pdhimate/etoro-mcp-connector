@@ -14,7 +14,7 @@ A [Claude Desktop extension](https://claude.com/docs/connectors/building/mcpb) (
 | `get_portfolio_summary` | Equity, available cash, used margin, current P&L, per-instrument exposure |
 | `get_positions` | Open positions (entry rate, amount, units, leverage, SL/TP) with instrument names |
 | `get_pnl` | Unrealized P&L per position with current close rates |
-| `get_balances` | Cash balances across eToro account types |
+| `get_balances` | Cash balances across eToro account types (real account only; not available in demo mode) |
 | `get_trade_history` | Closed trades: profit, fees, open/close rates and times |
 | `search_instruments` | Find stocks, ETFs, crypto, currencies, indices, commodities |
 | `get_quotes` | Live bid/ask for up to 100 instruments |
@@ -61,16 +61,17 @@ Requires Node.js ≥ 18.
 ```bash
 npm install
 npm run build      # compiles TypeScript to dist/
-npm run smoke      # boots the server over stdio and verifies the tool list
-npm install --omit=dev          # slim node_modules for packaging
-npx @anthropic-ai/mcpb pack . etoro-mcp-connector.mcpb
+npm run smoke      # boots the server over stdio and verifies the tools
+
+# Build the installable bundle (build + smoke + prune dev deps + pack):
+npm run pack:mcpb  # produces etoro-mcp-connector.mcpb
 ```
 
 ## Security notes
 
 - Your keys are sent **only** to eToro's official API endpoint, `https://public-api.etoro.com`, as the `x-api-key` / `x-user-key` headers eToro's documentation specifies. There is no other network traffic, no telemetry, and no local persistence of any account data.
 - Trading tools are opt-in twice over: they only exist when you enable them in settings **and** eToro only accepts the calls if your key was created with Write permission.
-- Claude Desktop additionally asks for your approval before any tool call that places, closes, or cancels an order (these tools are marked `destructiveHint`).
+- By default, Claude Desktop asks for your approval before each tool call. The order-placing/closing/cancelling tools are additionally annotated `destructiveHint` so MCP clients can treat them with extra caution — but this annotation is advisory and does not itself enforce a confirmation. We recommend never choosing "Always allow" for the trading tools.
 - eToro rate-limits keys to roughly 60 read / 20 write requests per minute; the connector retries politely on 429 responses.
 
 ## Privacy Policy

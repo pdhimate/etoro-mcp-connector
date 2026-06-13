@@ -32,8 +32,12 @@ export class EtoroApiError extends Error {
     public readonly requestId: string,
     public readonly body: string,
   ) {
+    // Bound the body so a gateway's HTML error page can't flood the
+    // model-visible tool output; the full body stays on the `body` property.
+    const shownBody =
+      body.length > 2000 ? `${body.slice(0, 2000)}… [truncated, ${body.length} chars total]` : body;
     super(
-      `eToro API error HTTP ${status} (x-request-id ${requestId}): ${body || "<empty response body>"}` +
+      `eToro API error HTTP ${status} (x-request-id ${requestId}): ${shownBody || "<empty response body>"}` +
         (status === 401 || status === 403
           ? " — check that your API key and User key are correct, not expired, match the selected environment (demo/real), and have the required permission (a Write key is needed for trading)."
           : status === 429
@@ -82,16 +86,30 @@ export class EtoroClient {
     return this.opts.demo ? "demo" : "real";
   }
 
-  private async request(method: string, path: string, query?: Query, body?: unknown): Promise<any> {
+  private async request(
+    method: string,
+    path: string,
+    query?: Query,
+    body?: unknown,
+    opts?: { retryOn5xx?: boolean },
+  ): Promise<any> {
     const url = new URL(path, BASE_URL);
     for (const [key, value] of Object.entries(query ?? {})) {
       if (value !== undefined) url.searchParams.set(key, String(value));
     }
 
+    // One request id per logical request, shared by all retry attempts:
+    // eToro documents x-request-id as the idempotency key for order
+    // placement, so a retry must not look like a brand-new order.
+    const requestId = randomUUID();
+    // A 5xx from a gateway does not prove eToro rejected the request, so
+    // state-changing POSTs must not be blindly retried on it. 429 is always
+    // safe to retry (the request was definitively rejected before processing).
+    const retryOn5xx = opts?.retryOn5xx ?? method !== "POST";
+
     const maxAttempts = 3;
     let lastError: EtoroApiError | undefined;
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-      const requestId = randomUUID();
       const headers: Record<string, string> = {
         "x-request-id": requestId,
         "x-api-key": this.opts.apiKey,
@@ -107,18 +125,19 @@ export class EtoroClient {
         signal: AbortSignal.timeout(30_000),
       });
 
-      // Retry transient failures; everything else surfaces immediately.
+      // Retry transient failures where safe; everything else surfaces immediately.
       if (res.status === 429 || res.status === 502 || res.status === 503 || res.status === 504) {
         const text = await res.text().catch(() => "");
         lastError = new EtoroApiError(res.status, requestId, text);
-        if (attempt < maxAttempts) {
+        const retryable = res.status === 429 || retryOn5xx;
+        if (retryable && attempt < maxAttempts) {
           const retryAfter = Number(res.headers.get("retry-after"));
           const delayMs =
             Number.isFinite(retryAfter) && retryAfter > 0 ? Math.min(retryAfter, 30) * 1000 : attempt * 2_000;
           await new Promise((resolve) => setTimeout(resolve, delayMs));
           continue;
         }
-        break;
+        throw lastError;
       }
 
       if (!res.ok) {
@@ -226,7 +245,12 @@ export class EtoroClient {
     return this.post(this.demo ? "/api/v2/trading/execution/demo/orders" : "/api/v2/trading/execution/orders", body);
   }
 
-  closePosition(positionId: number, body: { InstrumentId: number; UnitsToDeduct: number | null }): Promise<any> {
+  closePosition(positionId: number, params: { instrumentId: number; unitsToDeduct: number | null }): Promise<any> {
+    // The official OpenAPI spec cases the instrument field differently per
+    // environment: real requires `InstrumentId`, demo requires `InstrumentID`.
+    const body = this.demo
+      ? { InstrumentID: params.instrumentId, UnitsToDeduct: params.unitsToDeduct }
+      : { InstrumentId: params.instrumentId, UnitsToDeduct: params.unitsToDeduct };
     return this.post(
       this.demo
         ? `/api/v1/trading/execution/demo/market-close-orders/positions/${positionId}`
