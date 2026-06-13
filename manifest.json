@@ -1,0 +1,90 @@
+{
+  "manifest_version": "0.3",
+  "name": "etoro-mcp-connector",
+  "display_name": "eToro (Unofficial)",
+  "version": "0.1.0",
+  "description": "View your eToro portfolio, get market quotes, and optionally trade — right from Claude.",
+  "long_description": "Unofficial connector for the eToro public API (https://api-portal.etoro.com). Lets Claude read your portfolio, balances, P&L, trade history, and watchlists, search instruments, and fetch live quotes and price history. Trading tools (place/close/cancel orders) are off by default and only activate when you explicitly enable them in settings with a Write-permission eToro API key. Your keys are stored in your operating system's keychain and are only ever sent to eToro's official API at public-api.etoro.com. Works with both real and demo (virtual) eToro accounts. This project is not affiliated with or endorsed by eToro.",
+  "author": {
+    "name": "Pratik Dhimate",
+    "email": "pdhimate@gmail.com"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/pdhimate/etoro-mcp-connector"
+  },
+  "homepage": "https://github.com/pdhimate/etoro-mcp-connector",
+  "documentation": "https://github.com/pdhimate/etoro-mcp-connector#readme",
+  "support": "https://github.com/pdhimate/etoro-mcp-connector/issues",
+  "license": "MIT",
+  "keywords": ["etoro", "trading", "stocks", "crypto", "portfolio", "finance", "investing"],
+  "server": {
+    "type": "node",
+    "entry_point": "dist/index.js",
+    "mcp_config": {
+      "command": "node",
+      "args": ["${__dirname}/dist/index.js"],
+      "env": {
+        "ETORO_API_KEY": "${user_config.api_key}",
+        "ETORO_USER_KEY": "${user_config.user_key}",
+        "ETORO_DEMO_MODE": "${user_config.demo_mode}",
+        "ETORO_ENABLE_TRADING": "${user_config.enable_trading}"
+      }
+    }
+  },
+  "user_config": {
+    "api_key": {
+      "type": "string",
+      "title": "eToro API Key (public key)",
+      "description": "The API key (x-api-key) from etoro.com > Settings > Trading > API Key Management.",
+      "required": true,
+      "sensitive": true
+    },
+    "user_key": {
+      "type": "string",
+      "title": "eToro User Key (private key)",
+      "description": "The User key (x-user-key) created alongside the API key. A Read key allows portfolio and market data; a Write key additionally allows trading.",
+      "required": true,
+      "sensitive": true
+    },
+    "demo_mode": {
+      "type": "boolean",
+      "title": "Demo mode (virtual portfolio)",
+      "description": "Enable if your key was created for the Demo environment. Each eToro key works for exactly one environment (Demo or Real).",
+      "required": false,
+      "default": false
+    },
+    "enable_trading": {
+      "type": "boolean",
+      "title": "Enable trading tools",
+      "description": "Adds place_order, close_position, and cancel_order tools. Requires a key created with Write permission. Leave off for read-only access to your portfolio.",
+      "required": false,
+      "default": false
+    }
+  },
+  "tools": [
+    { "name": "get_account_info", "description": "Account identity, key scopes, and connector configuration" },
+    { "name": "get_portfolio_summary", "description": "Equity, cash, margin, P&L totals and per-instrument exposure" },
+    { "name": "get_positions", "description": "Open positions with instrument names, plus pending orders" },
+    { "name": "get_pnl", "description": "Unrealized P&L per position with current close rates" },
+    { "name": "get_balances", "description": "Cash balances across eToro account types" },
+    { "name": "get_trade_history", "description": "Closed trades with profit, fees, and rates" },
+    { "name": "search_instruments", "description": "Find stocks, ETFs, crypto and other instruments by name or ticker" },
+    { "name": "get_quotes", "description": "Live bid/ask prices for up to 100 instruments" },
+    { "name": "get_price_history", "description": "Historical OHLCV candles, one minute to one week" },
+    { "name": "get_watchlists", "description": "The user's watchlists and their instruments" },
+    { "name": "check_trade_eligibility", "description": "Pre-trade constraints: leverage, minimums, SL/TP limits" },
+    { "name": "get_order_status", "description": "Execution status of a submitted order" },
+    { "name": "place_order", "description": "Open a position (only when trading is enabled in settings)" },
+    { "name": "close_position", "description": "Close a position fully or partially (only when trading is enabled)" },
+    { "name": "cancel_order", "description": "Cancel a pending order (only when trading is enabled)" }
+  ],
+  "tools_generated": true,
+  "compatibility": {
+    "platforms": ["darwin", "win32", "linux"],
+    "runtimes": {
+      "node": ">=18.0.0"
+    }
+  },
+  "privacy_policies": ["https://github.com/pdhimate/etoro-mcp-connector/blob/main/PRIVACY.md"]
+}

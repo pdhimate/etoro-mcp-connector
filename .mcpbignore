@@ -1,0 +1,11 @@
+# Files excluded from the packed .mcpb bundle (only dist/, node_modules/,
+# manifest.json, package.json and docs should ship).
+src/
+scripts/
+.research/
+.git/
+.gitignore
+tsconfig.json
+*.mcpb
+package-lock.json
+PUBLISHING.md

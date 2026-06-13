@@ -1,0 +1,24 @@
+{
+  "name": "etoro-mcp-connector",
+  "version": "0.1.0",
+  "description": "Unofficial Claude Desktop connector (MCP server) for the eToro public API: portfolio, balances, market data, and optional trading.",
+  "type": "module",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc",
+    "smoke": "node scripts/smoke-test.mjs",
+    "prepack:mcpb": "npm run build && npm run smoke"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "zod": "^3.25.0"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "typescript": "^5.9.0"
+  },
+  "license": "MIT"
+}
